@@ -1,0 +1,52 @@
+# The smallest config that is actually CORRECT.
+#
+# Every line here is load-bearing. Removing any one of them produces a setup
+# that appears to work while doing something other than what you asked:
+#
+#   drop `reasoningEfforts`  -> reasoning silently stays ON, and you pay for it
+#   unquote `off` (2 places) -> YAML 1.1 boolean false; schema error or a
+#                               silently missing off level
+#   drop `thinkingFormat`    -> reasoning: null on the wire, billed anyway
+#   drop `openRouterRouting` -> OpenRouter picks the provider, not you
+#   drop `agent-default-model` -> headless falls back to a route needing a
+#                               DEEPSEEK_API_KEY you do not have
+#   `api` other than openai-completions -> compat switches are rejected
+#
+# Replace the three ALL-CAPS placeholders. Get the two numbers from:
+#   python3 scripts/probe-endpoints.py VENDOR/MODEL --quant fp8 --yaml
+#
+# The routing block requires scripts/patch-openrouter.sh on dsh 0.1.0-rc.7.
+
+llm-pi-ai:
+  providers:
+    openrouter:
+      displayName: OpenRouter
+      api: openai-completions
+      baseURL: https://openrouter.ai/api/v1
+      apiKeyEnv: OPENROUTER_API_KEY
+      reasoning: "off"
+      cacheRetention: long
+      transport: sse
+      timeoutMs: 180000
+      models:
+        - id: VENDOR/MODEL
+          name: MODEL NAME
+          contextWindow: CONTEXT_FROM_ENDPOINTS_API
+          maxTokens: MAX_OUT_FROM_ENDPOINTS_API
+          input: [ text ]
+          reasoningEfforts:
+            "off": none
+            low: low
+            medium: medium
+            high: high
+          compat:
+            thinkingFormat: openrouter
+            supportsReasoningEffort: true
+            openRouterRouting:
+              order: [YOUR_PROVIDER]
+              allow_fallbacks: true
+              quantizations: [fp8]
+
+agent-default-model:
+  provider: openrouter
+  model: VENDOR/MODEL
