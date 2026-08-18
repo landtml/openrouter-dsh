@@ -27,7 +27,7 @@ takes a timestamped backup first either way.
 
 ---
 
-## The two silent failures
+## The three silent failures
 
 ### 1. Provider pinning is discarded
 
@@ -60,6 +60,28 @@ After the fix, verified across 93 consecutive requests: **0 reasoning tokens.**
 
 → [`docs/04-reasoning.md`](docs/04-reasoning.md)
 
+### 3. `order` does not pin — it only *prefers*
+
+Even with the patch applied and `order: [DeepInfra, ...]` on the wire, a soft
+pin routes elsewhere. Measured over 299 recorded exchanges from one agent
+session:
+
+| served by | share |
+|---|---:|
+| DeepInfra | 70% |
+| GMICloud | **29%** |
+| StreamLake | <1% — **not in the `order` list at all** |
+
+`allow_fallbacks: true` makes `order` a preference, not a boundary. The cost is
+not the price difference: KV caches are per-provider, so every switch lands
+cold (98.0% -> 85.5% median cache, **+53% effective input price**), and
+supported parameters differ, so a failover can fail the request outright rather
+than degrade.
+
+Use `only: [PROVIDER]` with `allow_fallbacks: false`.
+
+→ [`docs/06-hard-pin-and-fallback-cost.md`](docs/06-hard-pin-and-fallback-cost.md)
+
 ---
 
 ## What's here
@@ -83,6 +105,8 @@ After the fix, verified across 93 consecutive requests: **0 reasoning tokens.**
 - [03 — Provider pinning and the patch](docs/03-provider-pinning.md)
 - [04 — Reasoning](docs/04-reasoning.md)
 - [05 — Troubleshooting](docs/05-troubleshooting.md)
+- [06 — The hard pin, and what a fallback really costs](docs/06-hard-pin-and-fallback-cost.md) — why `order` is not a boundary
+- [07 — Sampling parameters, measured](docs/07-parameters-measured.md) — including why `seed` does not give reproducibility
 
 ---
 

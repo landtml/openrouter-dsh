@@ -43,8 +43,12 @@ llm-pi-ai:
             thinkingFormat: openrouter
             supportsReasoningEffort: true
             openRouterRouting:
+              # `only` is the boundary. `order` + allow_fallbacks:true is a
+              # PREFERENCE -- measured leaking 30% of traffic to providers
+              # outside the list, including one not listed at all. See docs/06.
+              only: [YOUR_PROVIDER]
               order: [YOUR_PROVIDER]
-              allow_fallbacks: true
+              allow_fallbacks: false
               quantizations: [fp8]
 
 agent-default-model:

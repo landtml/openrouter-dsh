@@ -232,3 +232,21 @@ For a full session, `scripts/watch-proxy.py` records every exchange dsh makes
 and flags silent fallbacks, stray reasoning tokens and wrong quantization. It
 is how the two silent misconfigurations documented in this repo were found in
 the first place.
+
+---
+
+## Correction: `order` alone does not pin
+
+This document originally described `order` + `allow_fallbacks: true` as a
+working pin. Re-measured over 299 recorded exchanges, **it is not one** — 30%
+of traffic reached providers other than the first in the list, including one
+that was not in the list at all.
+
+`order` expresses a preference; **`only` is the boundary.** The full data, the
+cache and capability costs of a mid-run switch, and how to make the pin
+structural rather than advisory are in
+[06-hard-pin-and-fallback-cost.md](06-hard-pin-and-fallback-cost.md).
+
+Measured parameter behaviour on the pinned endpoint — including why `seed`
+does **not** give reproducibility — is in
+[07-parameters-measured.md](07-parameters-measured.md).

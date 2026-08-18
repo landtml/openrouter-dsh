@@ -133,32 +133,56 @@ llm-pi-ai:
             # pi-ai (openai-completions.js:643-644). OpenRouter's provider
             # routing docs describe every field here.
             openRouterRouting:
-              # Measured pick, in order. DeepInfra: ~95% cache from turn 3,
-              # 0.85-1.8s typical latency, 99.56% uptime, supports seed and
-              # structured_outputs.
-              order: [DeepInfra, GMICloud, BaseTen]
-
               # ------------------------------------------------------------
-              # CHOOSE DELIBERATELY. This is the one field whose right value
-              # depends on what you are doing.
+              # HARD PIN. `only` is the boundary; `order` is NOT.
               # ------------------------------------------------------------
-              # true  -- interactive/agentic use. A transient 429 from the
-              #          pinned provider reroutes instead of killing the run.
-              #          In a 93-exchange autonomous run, one unretried 429
-              #          ends the run.
-              # false -- benchmarking / cost receipts. A silent failover
-              #          changes quantization, cache behaviour and price
-              #          mid-run, making the numbers meaningless.
+              # An earlier version of this file shipped
+              #     order: [DeepInfra, GMICloud, BaseTen]
+              #     allow_fallbacks: true
+              # and argued the fallbacks were harmless. Re-measured over 299
+              # recorded exchanges from a real 55-minute agent session, that
+              # was wrong on three counts. See docs/06 for the full data.
               #
-              # Measured with fallbacks ON over 93 exchanges: 32% of requests
-              # served by GMICloud. Those were NOT worse -- 3.57s vs 1.43s
-              # median TTFT, but 6.01s vs 10.10s median TOTAL, 94.6% vs 94.4%
-              # cache, and marginally CHEAPER per output token. All listed
-              # providers are fp8, so answer quality does not vary.
-              allow_fallbacks: true
+              #   1. ROUTING LEAKS BEYOND THE LIST. 29% of traffic went to
+              #      GMICloud and one request went to StreamLake -- which was
+              #      not in `order` at all. With allow_fallbacks:true, `order`
+              #      is a preference, not a boundary.
+              #
+              #   2. SWITCHING COSTS MORE THAN THE PRICE DIFFERENCE. KV caches
+              #      are per-provider, so every switch lands cold. On requests
+              #      >5k prompt tokens: 98.0% median cache after the SAME
+              #      provider vs 85.5% after a switch, and effective input
+              #      price $0.0264/M -> $0.0405/M (+53%). One transition
+              #      dropped 92.0% -> 15.3% on a 51k-token prompt. That
+              #      session switched provider 101 times.
+              #
+              #   3. CAPABILITY VARIES, AND THAT BREAKS TASKS. structured
+              #      outputs: DeepInfra yes, GMICloud NO, StreamLake NO. A
+              #      json_schema response_format returns HTTP 400 on the
+              #      latter two, reproducibly, while the same call succeeds on
+              #      DeepInfra. A mid-run failover does not degrade
+              #      gracefully -- it fails the request outright.
+              #
+              # `only` restricts the candidate set to one endpoint, so there
+              # is nothing to fail over TO. An unavailable DeepInfra becomes a
+              # loud 404 instead of a quiet reroute at a different price,
+              # quantization and cache warmth. For a gated harness the loud
+              # failure is strictly better: it happens at request time rather
+              # than corrupting a step.
+              #
+              # Verified: 8/8 requests served by DeepInfra, 0 leaks.
+              #
+              # The 429 concern from the earlier version is real but is a
+              # RETRY problem, not a routing one. Solve it with a retry, not
+              # by handing routing back to the load balancer.
+              only: [DeepInfra]
+              order: [DeepInfra]
+              allow_fallbacks: false
 
               # Non-negotiable. fp4 endpoints are cheaper and measurably
-              # worse. Listing this excludes them even if one ranks first.
+              # worse. With `only` this is a second assertion rather than a
+              # tie-breaker: if DeepInfra ever stops offering fp8, the request
+              # fails loudly instead of quietly downgrading precision.
               quantizations: [fp8]
 
 # Make this the default for new sessions and headless runs. Without it, dsh

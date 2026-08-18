@@ -183,6 +183,12 @@ checks = [
      m["compat"]["openRouterRouting"]["order"][0] == "DeepInfra"),
     ("quantizations is [fp8]",
      m["compat"]["openRouterRouting"]["quantizations"] == ["fp8"]),
+    # HARD PIN invariants. `order` alone is a preference, not a boundary --
+    # measured leaking 30% of traffic to unlisted providers (docs/06).
+    ("routing pins with `only`, not just `order`",
+     m["compat"]["openRouterRouting"].get("only") == ["DeepInfra"]),
+    ("allow_fallbacks is False (no silent substitution)",
+     m["compat"]["openRouterRouting"].get("allow_fallbacks") is False),
     ("agent-default-model points at this model",
      d["agent-default-model"]["model"] == "deepseek/deepseek-v4-flash-0731"),
 ]

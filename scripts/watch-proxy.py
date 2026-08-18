@@ -30,6 +30,41 @@ if not KEY:
 STATE.mkdir(parents=True, exist_ok=True)
 UPSTREAM = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
+# --- optional structural provider pin ----------------------------------------
+# Off by default: this script's primary job is to OBSERVE. Set
+# DSH_PIN_PROVIDER to turn it into an enforcer as well.
+#
+#     DSH_PIN_PROVIDER=DeepInfra python3 scripts/watch-proxy.py 8799 ./watch
+#
+# Why enforce here rather than in settings.yaml alone: if dsh's baseURL points
+# at this proxy, every request passes through it, so it is the one place a pin
+# cannot be bypassed by an `npm update` reverting the schema patch, a plugin
+# building its own body, or an edited config file. The proxy does not TRUST the
+# routing block it receives -- it overwrites it.
+#
+# `only` is the boundary, not `order`: measured over 299 exchanges,
+# `order` + allow_fallbacks:true leaked 30% of traffic to other providers,
+# including one not in the list. See docs/06-hard-pin-and-fallback-cost.md.
+PIN_PROVIDER = os.environ.get("DSH_PIN_PROVIDER", "").strip()
+PIN_QUANT = [q for q in os.environ.get("DSH_PIN_QUANT", "fp8").split(",") if q]
+PIN = {
+    "only": [PIN_PROVIDER],
+    "order": [PIN_PROVIDER],
+    "allow_fallbacks": False,
+    **({"quantizations": PIN_QUANT} if PIN_QUANT else {}),
+} if PIN_PROVIDER else None
+
+
+def enforce_pin(req_json):
+    """Overwrite the routing block in place. Returns (changed, previous)."""
+    if PIN is None or not isinstance(req_json, dict):
+        return False, None
+    prev = req_json.get("provider")
+    if prev == PIN:
+        return False, None
+    req_json["provider"] = dict(PIN)
+    return True, prev
+
 print(f"watch-proxy listening on http://127.0.0.1:{PORT}/v1 -> {UPSTREAM}\n"
       f"recording to {STATE}\n\n"
       f"Point dsh at it by setting, in ~/.dsh/settings.yaml:\n"
@@ -53,6 +88,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             req_json = json.loads(body)
         except json.JSONDecodeError:
             req_json = {}
+
+        # Rewrite BEFORE forwarding, not while recording -- otherwise the pin
+        # applies only to the log and not to the request that leaves the host.
+        pin_rewritten, pin_prev = enforce_pin(req_json)
+        if pin_rewritten:
+            body = json.dumps(req_json).encode()
 
         started = time.time()
         first_token = None
@@ -110,10 +151,39 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         delta = (ch.get("delta") or {}).get("content")
                         if delta:
                             chunks.append(delta)
-        self._record(req_json, started, first_token, chunks, provider, usage, finish=finish)
+            else:
+                # Non-streaming reply: the whole body is one JSON object, so no
+                # `data:` line ever appears. Without this branch `provider`
+                # stays None -- the recording loses served_by AND the violation
+                # check below silently passes, a blind spot in exactly the path
+                # a `stream: false` client would take.
+                try:
+                    obj = json.loads(line)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    obj = None
+                if isinstance(obj, dict):
+                    provider = obj.get("provider") or provider
+                    usage = obj.get("usage") or usage
+                    for ch in obj.get("choices") or []:
+                        finish = ch.get("finish_reason") or finish
+
+        # LOUD FAIL: the pin is an assertion, not a hope. Substitution is the
+        # exact failure it exists to prevent, so say so where a log will catch
+        # it rather than letting it show up in a bill.
+        violation = None
+        if PIN is not None and provider and provider not in PIN["only"]:
+            violation = provider
+            print(f"[watch-proxy] PIN VIOLATION: pinned to {PIN['only']} "
+                  f"but response was served by {provider!r}",
+                  file=sys.stderr, flush=True)
+
+        self._record(req_json, started, first_token, chunks, provider, usage,
+                     finish=finish, pin_rewritten=pin_rewritten,
+                     pin_prev=pin_prev, violation=violation)
 
     def _record(self, req, started, first_token, chunks, provider, usage,
-                finish=None, error=None):
+                finish=None, error=None, pin_rewritten=False, pin_prev=None,
+                violation=None):
         # This is a ThreadingHTTPServer, so two in-flight requests could
         # otherwise glob the same count and one would overwrite the other --
         # silently losing an exchange from a record whose whole purpose is to
@@ -137,6 +207,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "tools": len(req.get("tools") or []),
             },
             "served_by": provider,
+            # Pin audit trail: what the client asked for, whether the proxy
+            # had to overwrite it, and whether the answer honoured it.
+            "pin": {
+                "enforced": PIN is not None,
+                "rewritten": pin_rewritten,
+                "requested_by_client": pin_prev,
+                "violation": violation,
+            },
             "usage": usage,
             "finish_reason": finish,
             "timing": {
