@@ -9,7 +9,7 @@ Writes one exchange-NNN.json per request holding the request body, the usage
 block, the serving provider, and the timings.
 """
 from __future__ import annotations
-import http.server, json, pathlib, sys, time, urllib.error, urllib.request
+import http.server, json, pathlib, sys, threading, time, urllib.error, urllib.request
 
 import os
 
@@ -35,6 +35,10 @@ print(f"watch-proxy listening on http://127.0.0.1:{PORT}/v1 -> {UPSTREAM}\n"
       f"Point dsh at it by setting, in ~/.dsh/settings.yaml:\n"
       f"    baseURL: http://127.0.0.1:{PORT}/v1\n",
       file=sys.stderr, flush=True)
+
+
+_SEQ_LOCK = threading.Lock()
+_SEQ = None
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -110,7 +114,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _record(self, req, started, first_token, chunks, provider, usage,
                 finish=None, error=None):
-        n = len(list(STATE.glob("exchange-*.json"))) + 1
+        # This is a ThreadingHTTPServer, so two in-flight requests could
+        # otherwise glob the same count and one would overwrite the other --
+        # silently losing an exchange from a record whose whole purpose is to
+        # be complete. Serialize the numbering.
+        with _SEQ_LOCK:
+            global _SEQ
+            if _SEQ is None:
+                _SEQ = len(list(STATE.glob("exchange-*.json")))
+            _SEQ += 1
+            n = _SEQ
         (STATE / f"exchange-{n:03d}.json").write_text(json.dumps({
             "n": n,
             "at": time.strftime("%H:%M:%S", time.localtime(started)),

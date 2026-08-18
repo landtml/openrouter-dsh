@@ -86,13 +86,21 @@ as though the model is gone. Measured.
 
 > **Pin the provider first, then take that provider's numbers.**
 
+Because `maxTokens` filters *every* provider in `order`, not just the first,
+a fallback with a lower ceiling would be silently excluded. Verified for this
+config by pinning each alone at `max_tokens: 384000` — DeepInfra, GMICloud and
+BaseTen all accept it, so the fallback chain is intact. See
+[`02-general-openrouter-model.md`](02-general-openrouter-model.md#maxtokens-applies-to-the-whole-order-not-just-the-first-entry)
+for the general rule.
+
 ---
 
 ## Step 2 — The configuration
 
 The full annotated file is [`config/deepseek-v4-flash.yaml`](../config/deepseek-v4-flash.yaml).
-`install.sh` merges it into `~/.dsh/settings.yaml` without disturbing your
-other settings. Condensed:
+`install.sh` merges it into `~/.dsh/settings.yaml`, replacing only the
+`openrouter` provider and leaving every other provider and top-level key
+intact. Condensed:
 
 ```yaml
 llm-pi-ai:

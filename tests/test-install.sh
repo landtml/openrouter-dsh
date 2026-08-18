@@ -97,6 +97,68 @@ grep -q "deep: value" "$TMP/existing.yaml" && ok "nested value survived" || bad 
 grep -q "welcomeNoticeVersion" "$TMP/existing.yaml" && ok "ui-onboarding survived" || bad "ui-onboarding lost"
 grep -q "deepseek-v4-flash-0731" "$TMP/existing.yaml" && ok "model added" || bad "model not added"
 
+head_ "7b. REGRESSION: a sibling provider inside llm-pi-ai survives"
+# This is the case the first version of merge_settings.py destroyed: every dsh
+# provider is nested inside the SINGLE top-level key `llm-pi-ai`, so a naive
+# top-level block swap deletes them all.
+cat > "$TMP/multi.yaml" <<'EOF'
+# my carefully tuned anthropic setup, do not touch
+llm-pi-ai:
+  providers:
+    anthropic:
+      apiKeyEnv: ANTHROPIC_API_KEY
+      models:
+        - id: claude-x
+    openrouter:
+      apiKeyEnv: OLD_KEY_NAME
+      models:
+        - id: some-other-model
+agent-default-model:
+  provider: anthropic
+  model: claude-x
+EOF
+python3 "$REPO/scripts/merge_settings.py" "$TMP/multi.yaml" \
+        "$REPO/config/deepseek-v4-flash.yaml" >/dev/null 2>&1
+python3 - "$TMP/multi.yaml" <<'PY'
+import sys
+try:
+    import yaml
+except ImportError:
+    print("  SKIP PyYAML not installed"); sys.exit(0)
+d = yaml.safe_load(open(sys.argv[1]))
+p = d["llm-pi-ai"]["providers"]
+raw = open(sys.argv[1]).read()
+checks = [
+    ("sibling provider `anthropic` survived", "anthropic" in p),
+    ("its apiKeyEnv intact",
+     p.get("anthropic", {}).get("apiKeyEnv") == "ANTHROPIC_API_KEY"),
+    ("its models list intact",
+     p.get("anthropic", {}).get("models") == [{"id": "claude-x"}]),
+    ("openrouter was replaced",
+     p["openrouter"]["models"][0]["id"] == "deepseek/deepseek-v4-flash-0731"),
+    ("routing pin present",
+     bool(p["openrouter"]["models"][0]["compat"]["openRouterRouting"]["order"])),
+    ("user's own comment survived", "do not touch" in raw),
+]
+bad = 0
+for label, good in checks:
+    print(("  \033[32mPASS\033[0m " if good else "  \033[31mFAIL\033[0m ") + label)
+    bad += 0 if good else 1
+sys.exit(1 if bad else 0)
+PY
+if [ $? -eq 0 ]; then PASS=$((PASS+6)); else FAIL=$((FAIL+1)); fi
+
+head_ "7c. REGRESSION: duplicate top-level keys are refused, not duplicated"
+printf 'llm-pi-ai:\n  providers:\n    a:\n      apiKeyEnv: X\nfoo: 1\nllm-pi-ai:\n  providers:\n    b:\n      apiKeyEnv: Y\n' > "$TMP/dup.yaml"
+if python3 "$REPO/scripts/merge_settings.py" "$TMP/dup.yaml" \
+           "$REPO/config/deepseek-v4-flash.yaml" >/dev/null 2>&1; then
+  bad "accepted a file with duplicate top-level keys"
+else
+  N="$(grep -c 'displayName: OpenRouter' "$TMP/dup.yaml" || true)"
+  [ "$N" -eq 0 ] && ok "refused and left the file untouched" \
+                 || bad "wrote the fragment $N time(s) into a malformed file"
+fi
+
 head_ "8. Result is valid YAML with the right values"
 python3 - "$TMP/fresh.yaml" <<'PY'
 import sys

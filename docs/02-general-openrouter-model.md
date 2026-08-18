@@ -97,6 +97,38 @@ not. Your own token ceiling excluded every candidate.
 
 > **Rule: pin the provider first, then take that provider's numbers.**
 
+### `maxTokens` applies to the WHOLE `order`, not just the first entry
+
+`maxTokens` is a per-model setting, so it filters **every** provider in your
+`order` list. If a fallback's ceiling is lower than your primary's, that
+fallback is silently excluded from the candidate set — exactly when
+`allow_fallbacks: true` was supposed to save you.
+
+Measured, pinning one provider at a time on this model:
+
+```
+CoreWeave (ceiling 262144), max_tokens 300000  -> 404 No endpoints found
+CoreWeave (ceiling 262144), max_tokens   1000  -> served by CoreWeave
+```
+
+For the config in this repo the chain is intact — DeepInfra, GMICloud and
+BaseTen all accept `384000`, verified by pinning each alone:
+
+```
+GMICloud, max_tokens 384000  -> ok
+BaseTen,  max_tokens 384000  -> ok
+```
+
+**Rule:** set `maxTokens` to the *minimum* ceiling across every provider in
+`order`, not the primary's. Or omit it entirely and let each provider apply its
+own — the safest choice when you list several with different limits.
+
+One trap in the probe output: a provider that reports
+`max_completion_tokens: 0` (GMICloud does) is not advertising a limit, not
+declaring a zero one. Do not copy that `0` into `maxTokens`, and do not treat
+it as an exclusion.
+
+
 ---
 
 ## 3. Provider pinning — the part that needs a patch

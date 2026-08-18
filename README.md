@@ -21,6 +21,10 @@ export OPENROUTER_API_KEY=sk-or-v1-...
 That installs dsh if missing, merges the config, applies the patch, and makes a
 real API call to verify the result. Re-runnable and idempotent.
 
+The merge replaces only the `openrouter` provider: your other providers,
+settings and top-level keys are left byte-for-byte alone, and `install.sh`
+takes a timestamped backup first either way.
+
 ---
 
 ## The two silent failures

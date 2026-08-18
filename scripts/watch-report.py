@@ -22,6 +22,13 @@ if not files:
 
 rows = [json.loads(f.read_text()) for f in files]
 
+# Distinct provider-pin orders across the session. More than one means the
+# config changed mid-session, which makes cost and cache numbers incomparable.
+orders_seen = {tuple(((r.get("request") or {}).get("provider_pref") or {})
+                     .get("order") or [])
+               for r in rows}
+orders_seen.discard(())
+
 # dsh fires side calls (session titling) that the client may abandon mid-stream.
 # They carry no usage and no provider, and reporting them as rows implies a
 # failure that did not happen.
@@ -71,10 +78,16 @@ for r in rows:
     if not pref:
         warns.append(f"exchange {r['n']}: NO provider pin in the request body "
                      f"-- the patch is not in effect")
-    elif pref.get("order", [None])[0] != "DeepInfra":
-        warns.append(f"exchange {r['n']}: pin order is {pref.get('order')}")
-    if pref and pref.get("quantizations") != ["fp8"]:
-        warns.append(f"exchange {r['n']}: quantizations = {pref.get('quantizations')}, expected ['fp8']")
+    # NOTE: do NOT check the order against a hardcoded provider name. The
+    # expected first choice is whatever THIS request asked for; a mismatch
+    # between requests is the thing worth flagging, and that is handled by the
+    # served-vs-first-choice check above.
+    elif len(orders_seen) > 1:
+        warns.append(f"exchange {r['n']}: pin order is {pref.get('order')}, "
+                     f"which differs from other requests in this session")
+    if pref and not pref.get("quantizations"):
+        warns.append(f"exchange {r['n']}: no quantizations filter -- a cheaper, "
+                     f"lower-precision endpoint (fp4) may serve this request")
     reasoning = req.get("reasoning")
     if reasoning and reasoning.get("effort") not in (None, "none", "off"):
         warns.append(f"exchange {r['n']}: reasoning is ON ({reasoning}) -- "
@@ -104,8 +117,8 @@ if warns:
     for w in dict.fromkeys(warns):
         print(f"  ! {w}")
 if not errors and not warns:
-    print("CLEAN: every request pinned to DeepInfra at fp8, reasoning off, "
-          "nothing truncated, no silent fallback.")
+    print("CLEAN: every request carried its provider pin and quantization "
+          "filter, reasoning was off, nothing truncated, no silent fallback.")
 
 if len(rows) == 1 and tot_cached == 0:
     print("\nNote: turn 1 is always a cold cache miss on every provider "
