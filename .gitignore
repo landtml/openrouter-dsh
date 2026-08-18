@@ -1,0 +1,8 @@
+# Never commit an API key or a captured session -- captures contain prompts.
+*.key
+.env
+watch/
+*.bak-*
+*.orig
+__pycache__/
+*.pyc

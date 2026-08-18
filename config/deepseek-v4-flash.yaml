@@ -1,0 +1,171 @@
+# DeepSeek V4 Flash 0731 via OpenRouter, pinned to DeepInfra.
+#
+# This is a MERGE FRAGMENT for ~/.dsh/settings.yaml, not a standalone file.
+# `scripts/install.sh` merges it in without clobbering your other settings.
+#
+# Every value here was derived from live measurement against the OpenRouter
+# endpoint catalogue, not from the published price table. The comments record
+# WHY each value is what it is, because the failure modes are silent: a wrong
+# value here does not error, it just quietly costs you money or latency.
+#
+# Re-derive the provider numbers yourself with:  scripts/probe-endpoints.py
+#
+# REQUIRES scripts/patch-openrouter.sh. Without that patch, the entire
+# `compat.openRouterRouting` block below is stripped by dsh's settings schema
+# and silently does nothing. See docs/03-provider-pinning.md.
+
+llm-pi-ai:
+  providers:
+    openrouter:
+      displayName: OpenRouter (DeepSeek V4 Flash)
+
+      # OpenRouter speaks the OpenAI chat-completions dialect. This value also
+      # gates the compat block: pi-ai refuses thinkingFormat and
+      # supportsReasoningEffort on any other api, by design.
+      api: openai-completions
+
+      baseURL: https://openrouter.ai/api/v1
+
+      # Read from the environment, never written to this file. Get a key at
+      # https://openrouter.ai/keys
+      apiKeyEnv: OPENROUTER_API_KEY
+
+      # ROUTE-LEVEL reasoning default. Must be QUOTED -- bare `off` is the
+      # YAML 1.1 boolean false, which is not a valid thinking level and fails
+      # schema validation with a confusing message.
+      #
+      # Measured cost of reasoning ON for agentic work: ~4x the output tokens
+      # and ~5x the latency (483-681 tok / 8.3-12.1s vs 119-231 tok /
+      # 2.0-4.2s). The architectural reason outranks the cost: reasoning buys
+      # a higher-variance BETTER FIRST DRAFT, while a verify-and-repair loop
+      # needs a VERIFIED FINAL one. Cheap fast turns buy more repair
+      # iterations, which is the mechanism that actually converges.
+      #
+      # Turn this to low/medium/high for one-shot analytical questions.
+      reasoning: "off"
+
+      # p99 headroom. A 15.8s stall was observed on an otherwise warm path.
+      timeoutMs: 180000
+
+      # Only matters when routing lands on a slow endpoint. DeepInfra measured
+      # 0.85-1.8s typical; the slowest fp8 endpoint on this model measured
+      # 3.9-26.5s.
+      streamIdleTimeoutMs: 120000
+
+      transport: sse
+
+      # Cache is THE cost lever. Measured across a 93-exchange agentic run:
+      # 94.5% of 3.4M prompt tokens served from cache. At cold rates that run
+      # would have cost ~$0.27; it cost $0.076.
+      cacheRetention: long
+
+      defaultInput: [ text ]
+
+      models:
+        - id: deepseek/deepseek-v4-flash-0731
+          name: DeepSeek V4 Flash 0731
+
+          # ---------------------------------------------------------------
+          # THESE ARE DEEPINFRA'S LIMITS, NOT THE MODEL'S.
+          # ---------------------------------------------------------------
+          # Read from /api/v1/models/<id>/endpoints, NOT from the model-level
+          # catalogue (which reports 1310720 / 393216 -- the BEST endpoint on
+          # the board, which may not be the one you pinned).
+          #
+          # With a provider pin, a max_tokens above the pinned provider's
+          # ceiling filters every endpoint away and OpenRouter answers:
+          #   404 "No endpoints found for deepseek/deepseek-v4-flash-0731"
+          # -- measured. The error names the model, so it reads like the model
+          # is gone. It is not; your token ceiling excluded every endpoint.
+          #
+          # RULE: pin the provider, THEN take that provider's numbers.
+          contextWindow: 1048576
+          maxTokens: 384000
+
+          input: [ text ]
+
+          # ---------------------------------------------------------------
+          # THIS BLOCK IS LOAD-BEARING FOR reasoning: "off" ABOVE.
+          # ---------------------------------------------------------------
+          # pi-ai's openrouter reasoning branch is guarded on
+          # `model.reasoning` being truthy (openai-completions.js:597).
+          # dsh derives that flag from this map:
+          #
+          #   resolveModelReasoning() -- dsh-llm-pi-ai/lib/index.js:1065
+          #     if (efforts === void 0) return { reasoning: base?.reasoning ?? false };
+          #
+          # So with NO reasoningEfforts map, model.reasoning is FALSE, the
+          # branch never runs, NO reasoning field is sent at all, and
+          # OpenRouter falls back to the provider's own default -- which is
+          # reasoning ON.
+          #
+          # MEASURED CONSEQUENCE: 5,502 reasoning tokens billed across a
+          # 16-exchange run that had `reasoning: "off"` set. That was 46% of
+          # all output tokens and 9% of the run cost, for reasoning that had
+          # been explicitly disabled.
+          #
+          # Declaring the map makes model.reasoning true, so the branch runs
+          # and sends {"reasoning":{"effort":"none"}} -- verified on the wire
+          # across 93 consecutive requests, 0 reasoning tokens billed.
+          #
+          # "off" MUST be quoted (YAML 1.1 boolean trap, same as above).
+          reasoningEfforts:
+            "off": none
+            low: low
+            medium: medium
+            high: high
+
+          compat:
+            # Selects pi-ai's OpenRouter reasoning dialect: a nested
+            # {"reasoning":{"effort":...}} object rather than OpenAI's flat
+            # reasoning_effort string.
+            #
+            # WITHOUT this, the request goes out with `reasoning: null` and
+            # the provider bills reasoning tokens anyway (measured: 76 tokens
+            # on a request that had reasoning off).
+            thinkingFormat: openrouter
+            supportsReasoningEffort: true
+
+            # ---------------------------------------------------------------
+            # REQUIRES THE PATCH. Stripped by dsh's schema without it.
+            # ---------------------------------------------------------------
+            # Emitted verbatim as the request body's `provider` object by
+            # pi-ai (openai-completions.js:643-644). OpenRouter's provider
+            # routing docs describe every field here.
+            openRouterRouting:
+              # Measured pick, in order. DeepInfra: ~95% cache from turn 3,
+              # 0.85-1.8s typical latency, 99.56% uptime, supports seed and
+              # structured_outputs.
+              order: [DeepInfra, GMICloud, BaseTen]
+
+              # ------------------------------------------------------------
+              # CHOOSE DELIBERATELY. This is the one field whose right value
+              # depends on what you are doing.
+              # ------------------------------------------------------------
+              # true  -- interactive/agentic use. A transient 429 from the
+              #          pinned provider reroutes instead of killing the run.
+              #          In a 93-exchange autonomous run, one unretried 429
+              #          ends the run.
+              # false -- benchmarking / cost receipts. A silent failover
+              #          changes quantization, cache behaviour and price
+              #          mid-run, making the numbers meaningless.
+              #
+              # Measured with fallbacks ON over 93 exchanges: 32% of requests
+              # served by GMICloud. Those were NOT worse -- 3.57s vs 1.43s
+              # median TTFT, but 6.01s vs 10.10s median TOTAL, 94.6% vs 94.4%
+              # cache, and marginally CHEAPER per output token. All listed
+              # providers are fp8, so answer quality does not vary.
+              allow_fallbacks: true
+
+              # Non-negotiable. fp4 endpoints are cheaper and measurably
+              # worse. Listing this excludes them even if one ranks first.
+              quantizations: [fp8]
+
+# Make this the default for new sessions and headless runs. Without it, dsh
+# falls back to its built-in `deepseek-official` route, which needs a
+# DEEPSEEK_API_KEY that an OpenRouter-only setup does not have.
+#
+# The Web UI's model picker rewrites this section when you pick a model there.
+agent-default-model:
+  provider: openrouter
+  model: deepseek/deepseek-v4-flash-0731
