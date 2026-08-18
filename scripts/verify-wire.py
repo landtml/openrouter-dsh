@@ -102,7 +102,7 @@ def main():
             headers={
                 "Authorization": f"Bearer {key}",
                 "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com/f-lndt/openrouter-dsh",
+                "HTTP-Referer": "https://github.com/landtml/openrouter-dsh",
                 "X-Title": "openrouter-dsh verify",
             },
         )

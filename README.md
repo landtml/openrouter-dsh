@@ -12,7 +12,7 @@ This repo documents exactly why, fixes both with a 3-line patch, and gives you
 tools that prove the fix on the wire instead of asking you to trust it.
 
 ```bash
-git clone https://github.com/f-lndt/openrouter-dsh
+git clone https://github.com/landtml/openrouter-dsh
 cd openrouter-dsh
 export OPENROUTER_API_KEY=sk-or-v1-...
 ./scripts/install.sh
