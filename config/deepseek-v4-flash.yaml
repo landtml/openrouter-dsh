@@ -54,6 +54,45 @@ llm-pi-ai:
 
       transport: sse
 
+      # ---------------------------------------------------------------------
+      # RETRY -- what makes the hard pin below survivable.
+      # ---------------------------------------------------------------------
+      # `dsh-llm-retry` ships mounted, and RATE_LIMIT is already in
+      # DEFAULT_RETRYABLE_CODES, so transient 429s never reach the agent. The
+      # DEFAULTS are the problem, not the mechanism:
+      #
+      #     maxRetries 2 · initialDelayMs 500 · maxDelayMs 10000 · jitter 0.1
+      #
+      # Measured over a 26-exchange session pinned to DeepInfra: 5 requests
+      # returned 429 `engine_overloaded`. Consecutive-429 burst lengths were
+      # [2, 2, 1] against maxRetries: 2 -- the budget was fully consumed
+      # TWICE. A third consecutive failure would have surfaced as a hard error
+      # and killed the step.
+      #
+      # It is not a quota on the key: 0/40 rapid small calls and 0/12 large
+      # tool-heavy calls reproduced it. It is transient shared-pool capacity,
+      # consistent with DeepInfra's ~99% published uptime.
+      #
+      # Retries also fired ~1s apart, often too fast for a capacity event to
+      # clear. Raising the ceiling and slowing the backoff removes the hard
+      # pin's only real cost. The usual argument for allow_fallbacks:true --
+      # "one unretried 429 ends the run" -- solves a RETRY problem with a
+      # ROUTING change; it buys availability by giving up cache locality and
+      # capability guarantees. Fix retries directly and you keep both.
+      #
+      # `mode: always` exists for unbounded retry. Deliberately not used here:
+      # it hangs indefinitely when a provider is genuinely down rather than
+      # briefly overloaded.
+      retryPolicy:
+        mode: normal
+        maxRetries: 5
+        backoff:
+          initialDelayMs: 1000
+          maxDelayMs: 20000
+          # Wider than the 0.1 default so concurrent retries de-synchronise
+          # instead of re-colliding on the same overloaded pool.
+          jitterRatio: 0.3
+
       # Cache is THE cost lever. Measured across a 93-exchange agentic run:
       # 94.5% of 3.4M prompt tokens served from cache. At cold rates that run
       # would have cost ~$0.27; it cost $0.076.

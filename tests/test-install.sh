@@ -189,6 +189,12 @@ checks = [
      m["compat"]["openRouterRouting"].get("only") == ["DeepInfra"]),
     ("allow_fallbacks is False (no silent substitution)",
      m["compat"]["openRouterRouting"].get("allow_fallbacks") is False),
+    # A hard pin has no failover, so the retry ceiling must be above dsh's
+    # default of 2 -- measured exhausting that budget twice in 26 exchanges.
+    ("retryPolicy raises maxRetries above the default of 2",
+     (d["llm-pi-ai"]["providers"]["openrouter"].get("retryPolicy") or {}).get("maxRetries", 0) > 2),
+    ("retryPolicy backoff is slower than the 500ms default",
+     ((d["llm-pi-ai"]["providers"]["openrouter"].get("retryPolicy") or {}).get("backoff") or {}).get("initialDelayMs", 0) >= 1000),
     ("agent-default-model points at this model",
      d["agent-default-model"]["model"] == "deepseek/deepseek-v4-flash-0731"),
 ]

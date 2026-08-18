@@ -111,6 +111,68 @@ strictly better: it happens at request time instead of corrupting a step.
 
 ---
 
+## The pin's one real cost, and how to remove it
+
+A hard pin has no failover, so a provider hiccup surfaces instead of being
+routed around. Measured over a 26-exchange session pinned to DeepInfra:
+
+| | |
+|---|---|
+| exchanges | 26 |
+| **HTTP 429** `engine_overloaded` | **5 (19%)** |
+| pin violations | 0 |
+| cache hit | 90.2% |
+| task outcome | **completed** |
+
+Every 429 recovered. `dsh-llm-retry` ships mounted and `RATE_LIMIT` is already
+in `DEFAULT_RETRYABLE_CODES`, so dsh retried and the agent never saw them.
+
+**The defaults are still too tight.** Consecutive-429 burst lengths were
+`[2, 2, 1]` against `maxRetries: 2` — the budget was fully consumed twice. A
+third consecutive failure would have surfaced as a hard error and killed the
+step.
+
+It is not a quota on your key. Probes reproducing the same shape returned
+**0/40** on rapid small calls and **0/12** on large tool-heavy calls. It is
+transient shared-pool capacity, consistent with DeepInfra's ~99% published
+uptime.
+
+dsh's defaults (`@deepseek-ai/dsh-llm`):
+
+```
+maxRetries 2 · initialDelayMs 500 · maxDelayMs 10000 · jitterRatio 0.1
+```
+
+Retries fired ~1s apart — often too fast for a capacity event to clear. Raise
+the ceiling and slow the backoff, at **provider level** in settings:
+
+```yaml
+retryPolicy:
+  mode: normal
+  maxRetries: 5
+  backoff:
+    initialDelayMs: 1000
+    maxDelayMs: 20000
+    jitterRatio: 0.3
+```
+
+Verified against dsh's own `resolveRetryPolicy()`: the values land exactly, and
+`retryableCodes` keeps `RATE_LIMIT`.
+
+With five retries and exponential backoff, a burst must persist ~15-30s to
+break through; the observed bursts lasted 1-2 seconds.
+
+**This is why the fallback argument is a category error.** "One unretried 429
+ends the run" solves a *retry* problem with a *routing* change — buying
+availability by giving up cache locality and capability guarantees. Fix retries
+directly and you keep all three.
+
+`mode: always` gives unbounded retry. Avoid it unless a stalled step genuinely
+beats a failed one: it hangs indefinitely when a provider is down rather than
+briefly overloaded.
+
+---
+
 ## Config alone is not structural
 
 The YAML above is only as good as the layer that emits it. Three ways it can

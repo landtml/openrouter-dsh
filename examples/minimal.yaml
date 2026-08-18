@@ -27,6 +27,17 @@ llm-pi-ai:
       reasoning: "off"
       cacheRetention: long
       transport: sse
+
+      # Raise the retry ceiling: dsh defaults to maxRetries 2 with a 500ms initial
+      # delay, which a hard pin can exhaust on a transient provider 429. See
+      # docs/06-hard-pin-and-fallback-cost.md.
+      retryPolicy:
+        mode: normal
+        maxRetries: 5
+        backoff:
+          initialDelayMs: 1000
+          maxDelayMs: 20000
+          jitterRatio: 0.3
       timeoutMs: 180000
       models:
         - id: VENDOR/MODEL

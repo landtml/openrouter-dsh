@@ -80,6 +80,13 @@ than degrade.
 
 Use `only: [PROVIDER]` with `allow_fallbacks: false`.
 
+A hard pin has no failover, so pair it with a raised retry ceiling — dsh's
+default `maxRetries: 2` was measured being fully consumed twice in 26
+exchanges. `dsh-llm-retry` already ships mounted and already treats
+`RATE_LIMIT` as retryable; only the defaults need widening. "One unretried 429
+ends the run" is a *retry* problem, not a reason to hand routing back to a load
+balancer.
+
 → [`docs/06-hard-pin-and-fallback-cost.md`](docs/06-hard-pin-and-fallback-cost.md)
 
 ---
