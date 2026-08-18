@@ -18,8 +18,12 @@ Three documented ways to influence routing, all tested live against
 | Method | Requested | Actually served by | Verdict |
 |---|---|---|---|
 | body `{"provider":{"order":["DeepInfra"]}}` | DeepInfra | **DeepInfra** | works |
-| header `X-OR-Provider-Order: DeepInfra` | DeepInfra | Io Net | ignored |
+| header `X-OR-Provider-Order: DeepInfra` | DeepInfra | Io Net / Inceptron* | ignored |
 | model suffix `deepseek-v4-flash-0731:nitro` | fastest | Wafer | ignored |
+
+\* Re-tested on a later date and it landed on a *different* provider again —
+which is the point: the header has no effect, so you get whoever OpenRouter
+would have picked anyway.
 
 The two failing methods return a normal 200 with a normal completion. Nothing
 signals that your routing preference was dropped. You simply pay a different
@@ -39,13 +43,13 @@ broken.
   [1] schemastery validates against `compatProfile`
         │  ← DROPS unknown keys. openRouterRouting was not declared.
         ▼
-  [2] resolveModelCompat()  (dsh-llm-pi-ai/lib/index.js:1105)
+  [2] resolveModelCompat()  (dsh-llm-pi-ai/lib/index.js:1104)
         │  ← builds the model's compat block
         ▼
   [3] materialized model.compat
         │
         ▼
-  [4] pi-ai openai-completions.js:643
+  [4] pi-ai openai-completions.js:644
         if (model.compat?.openRouterRouting)
             params.provider = model.compat.openRouterRouting;   ← already worked!
         ▼
@@ -68,7 +72,7 @@ replacement, idempotent, with a `.orig` backup taken on first run.
 
 ### Edit 1 — declare the key (the actual fix)
 
-`dsh-llm-pi-ai/lib/index.js:1371`
+`dsh-llm-pi-ai/lib/index.js:1369`
 
 ```diff
  const compatProfile = z.object({
@@ -89,7 +93,7 @@ survives upstream change.
 
 ### Edit 2 — read it, and fix the early return
 
-`resolveModelCompat()`, same file, ~line 1106
+`resolveModelCompat()`, same file, ~line 1106 (function starts at 1104)
 
 ```diff
  const supportsReasoningEffort = entry.compat?.supportsReasoningEffort ?? route?.supportsReasoningEffort;
@@ -116,7 +120,7 @@ Same function, the return statement
  } };
 ```
 
-Now `model.compat.openRouterRouting` exists, and pi-ai's line 643 does the rest.
+Now `model.compat.openRouterRouting` exists, and pi-ai's line 644 does the rest.
 
 ---
 

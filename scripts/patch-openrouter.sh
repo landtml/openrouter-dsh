@@ -65,6 +65,21 @@ fi
 
 echo "target: $TARGET"
 
+# ------------------------------------------------- upstream-fix detection
+# If a future dsh declares openRouterRouting in its OWN schema, this patch is
+# obsolete. Distinguish that from "we patched it" by checking for our exact
+# permissive form: upstream would almost certainly declare a real shape
+# (z.object({...})), not z.any().
+if grep -q "openRouterRouting" "$TARGET" && ! grep -q "openRouterRouting: z.any()" "$TARGET"; then
+  echo
+  echo "GOOD NEWS: this dsh already declares openRouterRouting in its own schema:"
+  grep -n "openRouterRouting" "$TARGET" | head -5 | sed 's/^/    /'
+  echo
+  echo "The patch is NOT needed on this version. Use the config as-is and drop"
+  echo "this script from your workflow. Confirm with:  scripts/verify-wire.py"
+  exit 0
+fi
+
 # ---------------------------------------------------------------- idempotency
 if grep -q "openRouterRouting: z.any()" "$TARGET" \
    && grep -q "openRouterRouting === void 0 ? {} : { openRouterRouting }" "$TARGET"; then

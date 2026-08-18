@@ -33,8 +33,8 @@ quantizations and latencies. Measured, all three documented ways to pin:
 | Method | Served by | |
 |---|---|---|
 | request body `{"provider":{"order":["DeepInfra"]}}` | **DeepInfra** | works |
-| header `X-OR-Provider-Order: DeepInfra` | Io Net | ignored |
-| model suffix `…:nitro` | Wafer | ignored |
+| header `X-OR-Provider-Order: DeepInfra` | whoever OpenRouter picks | ignored |
+| model suffix `…:nitro` | whoever OpenRouter picks | ignored |
 
 Only the body works — and dsh's settings schema strips the key that produces
 it before it reaches the code that would send it. The upstream library dsh

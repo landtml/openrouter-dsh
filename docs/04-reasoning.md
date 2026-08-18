@@ -12,7 +12,7 @@ reasoning off. 46% of all output tokens, 9% of the run's cost.
 ## Why
 
 Two conditions guard pi-ai's OpenRouter reasoning branch
-(`@earendil-works/pi-ai/dist/api/openai-completions.js:597`):
+(`@earendil-works/pi-ai/dist/api/openai-completions.js:598`):
 
 ```js
 else if (compat.thinkingFormat === "openrouter" && model.reasoning) {
@@ -35,7 +35,7 @@ OpenRouter then applies the provider's own default, which for most reasoning
 models is **on**.
 
 `model.reasoning` is set by dsh's `resolveModelReasoning()`
-(`dsh-llm-pi-ai/lib/index.js:1064`):
+(`dsh-llm-pi-ai/lib/index.js:1063`):
 
 ```js
 function resolveModelReasoning(provider, entry, base) {
@@ -47,7 +47,7 @@ function resolveModelReasoning(provider, entry, base) {
 }
 ```
 
-Line 1065 is the trap. **No `reasoningEfforts` → `reasoning: false` → branch
+Line 1065 — the `efforts === void 0` case — is the trap. **No `reasoningEfforts` → `reasoning: false` → branch
 never runs → nothing sent → provider default (on).**
 
 The setting that looks like it disables reasoning is the very thing whose

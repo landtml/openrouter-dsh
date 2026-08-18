@@ -4,9 +4,12 @@ This is the general procedure. For a complete worked example with measured
 values, see [`01-deepseek-v4-flash.md`](01-deepseek-v4-flash.md).
 
 Everything here was verified against **dsh 0.1.0-rc.7** and the
-`@earendil-works/pi-ai` it vendors. Source line numbers are cited so you can
-check them yourself; they will drift across versions, but the function names
-and logic are stable enough to find.
+`@earendil-works/pi-ai` it vendors.
+
+Source line numbers are cited so you can check the claims yourself. They refer
+to the **unpatched** files as npm installs them, and they will drift across
+versions — search for the function name rather than jumping to the line if the
+number no longer matches. The function names and the logic have been stable.
 
 ---
 
@@ -113,7 +116,7 @@ answer, from someone else, at a different price.
 ### Why a patch is needed
 
 The upstream library dsh vendors already emits this field.
-`@earendil-works/pi-ai/dist/api/openai-completions.js:643-644`:
+`@earendil-works/pi-ai/dist/api/openai-completions.js:644`:
 
 ```js
 // OpenRouter provider routing preferences
@@ -124,7 +127,7 @@ if (model.compat?.openRouterRouting) {
 
 The capability was never missing. dsh's *own* settings schema simply did not
 declare `openRouterRouting` as a valid `compat` key, so schemastery stripped
-it before it could reach that code. `dsh-llm-pi-ai/lib/index.js:1371`
+it before it could reach that code. `dsh-llm-pi-ai/lib/index.js:1369`
 originally read:
 
 ```js
@@ -190,14 +193,14 @@ you are billed for it, even with `reasoning: "off"` on the route.
 ### The mechanism
 
 pi-ai's OpenRouter reasoning branch is guarded on *two* conditions
-(`openai-completions.js:597`):
+(`openai-completions.js:598`):
 
 ```js
 else if (compat.thinkingFormat === "openrouter" && model.reasoning) {
 ```
 
 `model.reasoning` comes from dsh's `resolveModelReasoning()`
-(`dsh-llm-pi-ai/lib/index.js:1064-1065`):
+(`dsh-llm-pi-ai/lib/index.js:1063`):
 
 ```js
 function resolveModelReasoning(provider, entry, base) {
