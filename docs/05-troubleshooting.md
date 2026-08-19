@@ -163,6 +163,45 @@ agent-default-model:
 
 ---
 
+## Web search: `DeepSeek search has no API key for "DEEPSEEK_API_KEY"`
+
+**Do not go looking for a DeepSeek key.** The message names the wrong cause.
+dsh's stock search provider cannot work over OpenRouter even with a valid
+DeepSeek key: it requires `web_search_tool_result` blocks, and OpenRouter
+returns the same data as `citations[]` on text blocks instead. Native search
+does run — `server_tool_use` is present in the response — so this is a shape
+mismatch wearing a credential error's clothing.
+
+The provider reports itself as available with no credential at all
+(`available()` returns true whenever `resolveApiKey` is defined, which is
+always), so the web seam selects it and the failure surfaces at search time
+rather than as "no usable search provider".
+
+Fix: disable the stock provider, register one that reads `citations[]`, and
+point the web seam at it. See [`08-web-search.md`](08-web-search.md) and
+[`providers/dsh-web-search-openrouter/`](../providers/dsh-web-search-openrouter/).
+
+If you have already done that and still see this error, check for a **later
+patch layer** re-enabling `web-search-deepseek` or setting
+`searchProvider: null`. Later entries win, silently.
+
+---
+
+## Web search: `the model did not invoke native web search`
+
+The query reached the model but it answered from memory instead of searching.
+Send the query wrapped, not bare:
+
+```js
+content: [{ type: "text", text: `Perform a web search for the query: ${query}` }]
+```
+
+Measured 2026-08-19: `"What is the capital of Denmark?"` sent bare returns
+`[thinking, text]` with no `server_tool_use` and 0 citations; wrapped, it
+returns 5. This hits hardest on queries the model believes it already knows.
+
+---
+
 ## `401 Unauthorized`
 
 - Is `OPENROUTER_API_KEY` exported in the shell that launched dsh? A key set in
