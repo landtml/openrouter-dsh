@@ -1,0 +1,10 @@
+{
+  "name": "dsh-web-search-openrouter",
+  "version": "0.1.0",
+  "description": "Web search for dsh over OpenRouter's Anthropic-compatible Messages API",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": { ".": "./src/index.js", "./package.json": "./package.json" },
+  "files": ["src/**/*.js", "README.md"],
+  "license": "MIT"
+}

@@ -114,6 +114,7 @@ balancer.
 - [05 — Troubleshooting](docs/05-troubleshooting.md)
 - [06 — The hard pin, and what a fallback really costs](docs/06-hard-pin-and-fallback-cost.md) — why `order` is not a boundary
 - [07 — Sampling parameters, measured](docs/07-parameters-measured.md) — including why `seed` does not give reproducibility
+- [08 — Web search over OpenRouter](docs/08-web-search.md) — the fourth silent failure, and why its error names the wrong cause
 
 ---
 

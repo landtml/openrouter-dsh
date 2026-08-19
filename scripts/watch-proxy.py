@@ -15,15 +15,27 @@ import os
 
 if len(sys.argv) < 3:
     print(__doc__)
-    print("Usage: watch-proxy.py <port> <state-dir> [api-key]\n"
-          "       api-key defaults to $OPENROUTER_API_KEY", file=sys.stderr)
+    print("Usage: OPENROUTER_API_KEY=sk-or-... watch-proxy.py <port> <state-dir>\n"
+          "       (deprecated: an api-key may be passed as argv[3] — see below)",
+          file=sys.stderr)
     raise SystemExit(2)
 
 PORT = int(sys.argv[1])
 STATE = pathlib.Path(sys.argv[2])
-KEY = sys.argv[3] if len(sys.argv) > 3 else os.environ.get("OPENROUTER_API_KEY", "")
+
+# Prefer the environment. A key passed as argv[3] is visible to EVERY process on
+# the machine -- `ps aux`, `pgrep -af`, /proc/<pid>/cmdline -- for as long as
+# this proxy runs, which is the whole session. It is retained only for backward
+# compatibility; pass the key in the environment instead.
+KEY = os.environ.get("OPENROUTER_API_KEY", "")
+if not KEY and len(sys.argv) > 3:
+    KEY = sys.argv[3]
+    print("WARNING: the API key was passed on the command line, where every "
+          "local process can read it (ps/pgrep//proc). Set OPENROUTER_API_KEY "
+          "in the environment instead, and rotate this key if the machine is "
+          "shared.", file=sys.stderr)
 if not KEY:
-    print("ERROR: no API key. Pass one as argv[3] or set OPENROUTER_API_KEY.",
+    print("ERROR: no API key. Set OPENROUTER_API_KEY in the environment.",
           file=sys.stderr)
     raise SystemExit(2)
 
