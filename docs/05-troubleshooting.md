@@ -133,6 +133,24 @@ reasoningEfforts:
 The map must offer at least one real thinking level. For a non-reasoning model
 use `reasoningEfforts: false`.
 
+### The model rejects `effort: "none"` (reasoning is mandatory)
+
+Some models cannot have reasoning disabled at all. Check the catalogue first:
+
+```bash
+curl -s https://openrouter.ai/api/v1/models \
+  | jq '.data[] | select(.id=="<vendor/model>") | .reasoning'
+```
+
+`"mandatory": true` means **do not send `effort: "none"`** — it is rejected,
+not ignored. Drop `"off"` from `reasoningEfforts`, declare only the levels in
+`supported_efforts`, and default `reasoning:` to the lowest one.
+
+Two traps here: `supported_efforts` may omit `medium` (common, and invalid on
+models that do not list it), and `default_effort` is often `max` — so an
+omitted reasoning field buys the *most expensive* level rather than none. See
+[09-dsh-0.1.1-and-mandatory-reasoning.md](09-dsh-0.1.1-and-mandatory-reasoning.md).
+
 ---
 
 ## The model does not appear in the Web UI picker
@@ -243,12 +261,41 @@ backoff that honours `Retry-After` rather than removing the pin.
 Expect warm-up rather than an instant hit. Measured curve over a real run:
 0% → 74% → 86% → 98% across the first four exchanges.
 
+**Do not trust `supports_implicit_caching: false` to mean "no caching".**
+Measured on `z-ai/glm-5.3-flash` via Novita, which reports that flag on every
+endpoint: two identical 7,144-token requests went 0% → **99%** cached,
+$0.000537 → $0.000110. The flag means "does not advertise implicit caching".
+Send the same prompt twice and measure.
+
+---
+
+## `NO_ADAPTER: no adapter registered for provider "<x>"`
+
+The route was refused during validation, so it never registered. The message
+names the route, not the reason.
+
+On dsh 0.1.1+, the most likely reason is a **withheld compat field**: setting
+`openRouterRouting` on an unpatched build rejects the whole profile. Confirm:
+
+```bash
+grep -n 'openRouterRouting:' \
+  "$(npm root -g)"/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js
+```
+
+`"withhold"` → run `scripts/patch-openrouter.sh`. `z.any()` and `"offer"` →
+already patched, look elsewhere.
+
+Other causes: a `reasoningEfforts` level the model does not accept, or a
+`compat` key misspelled. Each raises a specific message — surface it by
+validating the profile directly rather than reading dsh's summary.
+
 ---
 
 ## The patch script says an anchor was not found
 
-Your dsh version differs from 0.1.0-rc.7. The script writes nothing in this
-case.
+Your dsh version differs from the ones the patch targets (0.1.0-rc.7 and
+0.1.1-rc.2). The script writes nothing in this case, which is the intended
+behaviour — a patch that half-applies is worse than one that refuses.
 
 First check whether you still need it:
 
@@ -257,8 +304,22 @@ grep -n "openRouterRouting" \
   "$(npm root -g)"/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js
 ```
 
-If dsh now declares it in its own schema, **delete the patch step** — it was
-fixed upstream. Otherwise see "Porting to a newer dsh" in
+Read the **disposition**, not just the presence of the name:
+
+| what you see | meaning | action |
+|---|---|---|
+| nothing | field unknown to dsh | patch (pre-0.1.1 layout) |
+| `openRouterRouting: "withhold"` | known and **refused** | patch (0.1.1+ layout) |
+| `openRouterRouting: "offer"` | patched already | none |
+| `openRouterRouting: z.any()` | patched already (schema) | none |
+| a real `z.object({…})` shape | genuinely fixed upstream | drop the patch step |
+
+**`"withhold"` is a refusal, not a fix.** An earlier version of this document
+and of `patch-openrouter.sh` treated any occurrence of the name as an upstream
+fix, printed "GOOD NEWS … drop this script", and left users with no pin at all.
+See [09-dsh-0.1.1-and-mandatory-reasoning.md](09-dsh-0.1.1-and-mandatory-reasoning.md).
+
+Otherwise see "Porting to a newer dsh" in
 [`03-provider-pinning.md`](03-provider-pinning.md).
 
 ---

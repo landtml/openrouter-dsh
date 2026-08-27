@@ -1,0 +1,161 @@
+# GLM 5.3 Flash (Z.ai) via OpenRouter, pinned to Novita.
+#
+# This is a MERGE FRAGMENT for ~/.dsh/settings.yaml, not a standalone file.
+# `scripts/install.sh` merges it in without clobbering your other settings.
+#
+# Companion to config/deepseek-v4-flash.yaml. The differences between the two
+# are the interesting part: this model CANNOT disable reasoning, its cheapest
+# endpoint is not its first-party one, and its catalogue claims it does not
+# cache when measurement says it does. See
+# docs/09-dsh-0.1.1-and-mandatory-reasoning.md.
+#
+# Values derived from the live endpoint catalogue on 2026-08-27, not the
+# published price table. Re-derive with:  scripts/probe-endpoints.py
+#
+# REQUIRES scripts/patch-openrouter.sh. On dsh 0.1.1+ the patch flips a compat
+# gate from "withhold" to "offer"; without it, setting openRouterRouting is
+# refused and the WHOLE ROUTE fails to register with a misleading
+# `NO_ADAPTER` error.
+
+llm-pi-ai:
+  providers:
+    openrouter:
+      displayName: OpenRouter (GLM 5.3 Flash)
+
+      # OpenRouter speaks the OpenAI chat-completions dialect. This value also
+      # gates the compat block: pi-ai refuses thinkingFormat and
+      # supportsReasoningEffort on any other api, by design.
+      api: openai-completions
+
+      baseURL: https://openrouter.ai/api/v1
+
+      # Read from the environment, never written to this file. Get a key at
+      # https://openrouter.ai/keys
+      apiKeyEnv: OPENROUTER_API_KEY
+
+      # REASONING CANNOT BE TURNED OFF ON THIS MODEL. The catalogue reports
+      #     reasoning: {mandatory: true, default_enabled: true,
+      #                 supported_efforts: [max, high, low], default_effort: max}
+      # and OpenRouter's guidance for mandatory:true is explicit: do not send
+      # effort "none" -- the model rejects it.
+      #
+      # `low` is the floor and the right default for a gate-style harness:
+      # reasoning buys a higher-variance better FIRST draft, while a gated
+      # harness needs a verified FINAL one, so cheap fast turns that buy more
+      # repair iterations are what actually converges.
+      #
+      # Note what the alternative costs: default_effort is `max`, so a route
+      # that sends NO reasoning field (the trap in docs/04-reasoning.md) lands
+      # on the most expensive level rather than none.
+      reasoning: low
+
+      timeoutMs: 180000
+
+      # Novita measured p50 1722ms / p90 7646ms / p99 18141ms. The idle window
+      # stays generous because a hard pin has nothing to fail over to: a slow
+      # tail must be waited out rather than rerouted.
+      streamIdleTimeoutMs: 120000
+
+      transport: sse
+
+      # A hard pin has no failover, so the retry ceiling carries the
+      # reliability. dsh's default maxRetries:2 was measured being fully
+      # consumed twice in 26 exchanges on a busy endpoint.
+      retryPolicy:
+        mode: normal
+        maxRetries: 5
+        backoff:
+          initialDelayMs: 1000
+          maxDelayMs: 20000
+          # Wider than the 0.1 default so concurrent retries de-synchronise
+          # instead of re-colliding on the same overloaded pool.
+          jitterRatio: 0.3
+
+      # Ask for the longest retention on offer; it costs nothing if ignored.
+      #
+      # Every endpoint for this model reports `supports_implicit_caching:
+      # false`, which reads like "caching is not a lever here". MEASURED, IT IS
+      # NOT TRUE. Two identical 7144-token requests on Novita, back to back:
+      #     cold  7144 prompt /    0 cached ( 0%)  $0.000537
+      #     warm  7144 prompt / 7104 cached (99%)  $0.000110
+      # A 4.9x saving. The flag means "does not ADVERTISE implicit caching".
+      cacheRetention: long
+
+      # GLM 5.3 Flash is natively multimodal (input_modalities: text, image,
+      # video). Kept to text because that is what this harness sends; widen it
+      # deliberately if image input is actually used.
+      defaultInput: [ text ]
+
+      models:
+        - id: z-ai/glm-5.3-flash
+          name: GLM 5.3 Flash
+
+          # NOVITA's limits, from /api/v1/models/<id>/endpoints -- NOT the
+          # model-level catalogue figures, which describe the best provider on
+          # the board. With allow_fallbacks:false, a max_tokens above the
+          # pinned provider's ceiling filters every endpoint away and the pin
+          # becomes a hard 404.
+          #
+          # This output ceiling is much lower than several other endpoints
+          # offer on the same model (943718 on GMICloud/Modal/Parasail).
+          contextWindow: 1048576
+          maxTokens: 131072
+          input: [ text ]
+
+          # ONLY the three levels the model accepts. supported_efforts is
+          # [max, high, low]: there is no `medium` and no `off`/`none`.
+          #
+          # "off" is deliberately ABSENT rather than mapped to something
+          # harmless -- mapping it would put a rejected value one UI click
+          # away. A model that genuinely cannot reason should use
+          # `reasoningEfforts: false` instead.
+          reasoningEfforts:
+            low: low
+            high: high
+            max: max
+
+          compat:
+            # Without thinkingFormat the reasoning switch never reaches the
+            # wire: pi-ai only emits OpenRouter's nested reasoning object when
+            # the model's thinkingFormat says `openrouter`.
+            thinkingFormat: openrouter
+            supportsReasoningEffort: true
+
+            openRouterRouting:
+              # ---- HARD PIN. Novita or nothing. ------------------------
+              #
+              # WHY NOT Z.AI, the model's own vendor: three providers share the
+              # cheapest tier at identical prices ($0.075 / $0.25 / $0.015
+              # cache read, discount 0.5), and Z.AI is the weakest of them.
+              # Measured 2026-08-27:
+              #     Novita     p50 1722ms  p99 18141ms  uptime5m 99.91%  ok
+              #     GMICloud   p50 3007ms  p99 15296ms  uptime5m 86.88%  status -2
+              #     Z.AI       p50 5028ms  p99 55352ms  uptime5m 99.19%  ok
+              # Z.AI is 2.9x slower at p50 for the same money, and its 55s p99
+              # is long enough to collide with streamIdleTimeoutMs. Novita also
+              # exposes seed + response_format + tools, which the Z.AI endpoint
+              # does not list.
+              #
+              # DeepInfra serves this model at 2x the price ($0.15 / $0.50).
+              # The right provider for one model is not the right provider for
+              # the next -- re-probe per model.
+              #
+              # `only` is the boundary; `order` alone is merely a preference.
+              # See docs/06-hard-pin-and-fallback-cost.md.
+              only: [ Novita ]
+              order: [ Novita ]
+              allow_fallbacks: false
+              # A second assertion rather than a tie-breaker: if Novita ever
+              # stops offering fp8, fail loudly instead of quietly downgrading
+              # precision.
+              quantizations: [ fp8 ]
+
+# Make this the default for new agents and headless sessions. Without it, dsh
+# falls back to a built-in route that needs a different vendor's API key.
+#
+# `provider` here is the ROUTE KEY above (`openrouter`), not a vendor name.
+# reasoningEffort must be one of the levels declared in reasoningEfforts.
+agent-default-model:
+  provider: openrouter
+  model: z-ai/glm-5.3-flash
+  reasoningEffort: low

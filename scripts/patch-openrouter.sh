@@ -70,7 +70,20 @@ echo "target: $TARGET"
 # obsolete. Distinguish that from "we patched it" by checking for our exact
 # permissive form: upstream would almost certainly declare a real shape
 # (z.object({...})), not z.any().
-if grep -q "openRouterRouting" "$TARGET" && ! grep -q "openRouterRouting: z.any()" "$TARGET"; then
+#
+# CAUTION -- knowing the field is NOT the same as offering it. dsh 0.1.1-rc.2
+# added a compat gate that names openRouterRouting and REFUSES it:
+#
+#     openRouterRouting: "withhold",     <- in COMPLETIONS_COMPAT_GATE
+#
+# A bare `grep -q openRouterRouting` matches that refusal. This script used to
+# read it as an upstream fix and print "GOOD NEWS ... drop this script", which
+# is the worst possible advice: the field is rejected, the route is refused
+# wholesale, and the pin silently stops reaching the wire. Check the gate's
+# disposition, not merely the field's presence.
+if grep -q 'openRouterRouting: "withhold"' "$TARGET"; then
+  : # upstream knows the field and refuses it -- the patch below flips that.
+elif grep -q "openRouterRouting" "$TARGET" && ! grep -q "openRouterRouting: z.any()" "$TARGET"; then
   echo
   echo "GOOD NEWS: this dsh already declares openRouterRouting in its own schema:"
   grep -n "openRouterRouting" "$TARGET" | head -5 | sed 's/^/    /'
@@ -81,8 +94,12 @@ if grep -q "openRouterRouting" "$TARGET" && ! grep -q "openRouterRouting: z.any(
 fi
 
 # ---------------------------------------------------------------- idempotency
+# Two shapes count as patched, because the two dsh layouts need different work:
+#   pre-0.1.1  three edits, ending in the spread into the compat block
+#   0.1.1+     two edits; resolveModelCompat is gate-driven and needs no spread
 if grep -q "openRouterRouting: z.any()" "$TARGET" \
-   && grep -q "openRouterRouting === void 0 ? {} : { openRouterRouting }" "$TARGET"; then
+   && { grep -q "openRouterRouting === void 0 ? {} : { openRouterRouting }" "$TARGET" \
+        || grep -q 'openRouterRouting: "offer"' "$TARGET"; }; then
   echo "already patched -- nothing to do"
   exit 0
 fi
@@ -116,37 +133,82 @@ function edit(name, from, to) {
   console.log(`  [ok]   ${name}`);
 }
 
-// EDIT 1 -- schema. Without this, schemastery strips openRouterRouting from
-// the parsed settings and nothing downstream ever sees it.
-edit("schema: accept openRouterRouting",
-  `const compatProfile = z.object({
+// Two dsh layouts need different work, so the edits are selected by which one
+// this file is, rather than applied blindly:
+//
+//   pre-0.1.1   compatProfile has 3 fields; resolveModelCompat threads each
+//               compat switch by hand, so the value must be read, guarded and
+//               spread -- three edits.
+//   0.1.1+      compatProfile has ~20 fields; resolveModelCompat is
+//               gate-driven and threads any OFFERED field on its own, so only
+//               the schema and the gate need touching -- two edits.
+//
+// Verified against 0.1.0-rc.7 and 0.1.1-rc.2.
+const GATED = s.includes('openRouterRouting: "withhold"');
+
+if (GATED) {
+  // ---- dsh 0.1.1+ ----------------------------------------------------------
+  // EDIT 1 -- schema. Anchored on the LAST field of compatProfile rather than
+  // the whole object: that list grew from 3 fields to 20 between rc.7 and
+  // rc.2, and anchoring on the full literal is what broke this patch.
+  edit("schema: accept openRouterRouting",
+    `	supportsStrictTools: z.boolean()
+});`,
+    `	supportsStrictTools: z.boolean(),
+	openRouterRouting: z.any()
+});`);
+
+  // EDIT 2 -- the compat gate. This is the whole patch on this layout.
+  //
+  // Upstream marks the field "withhold": known, deliberately not configurable,
+  // on the stated rationale that "pi-ai's installed catalog sets it for the
+  // vendors that need it, so name that provider as the route instead."
+  //
+  // That rationale does not survive contact with the catalog: pi-ai ships NO
+  // openRouterRouting for ANY model (checked 2026-08-27 against
+  // dist/models.generated.js). Withholding the field therefore leaves no way
+  // to express a provider pin at all -- and OpenRouter honours pinning ONLY as
+  // a `provider` object in the request body.
+  //
+  // "offer" is the disposition resolveModelCompat reads to admit a configured
+  // field, so this one word is what puts the pin back on the wire.
+  edit("gate: offer openRouterRouting",
+    `	openRouterRouting: "withhold",`,
+    `	openRouterRouting: "offer",`);
+} else {
+  // ---- dsh pre-0.1.1 -------------------------------------------------------
+  // EDIT 1 -- schema. Without this, schemastery strips openRouterRouting from
+  // the parsed settings and nothing downstream ever sees it.
+  edit("schema: accept openRouterRouting",
+    `const compatProfile = z.object({
 	thinkingFormat: z.union(SUPPORTED_THINKING_FORMATS),
 	supportsReasoningEffort: z.boolean()
 });`,
-  `const compatProfile = z.object({
+    `const compatProfile = z.object({
 	thinkingFormat: z.union(SUPPORTED_THINKING_FORMATS),
 	supportsReasoningEffort: z.boolean(),
 	openRouterRouting: z.any()
 });`);
 
-// EDIT 2 -- read the value and keep the early-return honest. Without the
-// added guard clause, a model that sets ONLY openRouterRouting (no reasoning
-// switches) returns {} here and the routing is dropped.
-edit("resolve: read + guard",
-  `	const supportsReasoningEffort = entry.compat?.supportsReasoningEffort ?? route?.supportsReasoningEffort;
+  // EDIT 2 -- read the value and keep the early-return honest. Without the
+  // added guard clause, a model that sets ONLY openRouterRouting (no reasoning
+  // switches) returns {} here and the routing is dropped.
+  edit("resolve: read + guard",
+    `	const supportsReasoningEffort = entry.compat?.supportsReasoningEffort ?? route?.supportsReasoningEffort;
 	if (thinkingFormat === void 0 && supportsReasoningEffort === void 0) return {};`,
-  `	const supportsReasoningEffort = entry.compat?.supportsReasoningEffort ?? route?.supportsReasoningEffort;
+    `	const supportsReasoningEffort = entry.compat?.supportsReasoningEffort ?? route?.supportsReasoningEffort;
 	const openRouterRouting = entry.compat?.openRouterRouting ?? route?.openRouterRouting;
 	if (thinkingFormat === void 0 && supportsReasoningEffort === void 0 && openRouterRouting === void 0) return {};`);
 
-// EDIT 3 -- emit it into the materialized model's compat block, which is what
-// pi-ai reads at openai-completions.js:643.
-edit("emit: spread into compat",
-  `		...supportsReasoningEffort === void 0 ? {} : { supportsReasoningEffort }
+  // EDIT 3 -- emit it into the materialized model's compat block, which is what
+  // pi-ai reads at openai-completions.js:643.
+  edit("emit: spread into compat",
+    `		...supportsReasoningEffort === void 0 ? {} : { supportsReasoningEffort }
 	} };`,
-  `		...supportsReasoningEffort === void 0 ? {} : { supportsReasoningEffort },
+    `		...supportsReasoningEffort === void 0 ? {} : { supportsReasoningEffort },
 		...openRouterRouting === void 0 ? {} : { openRouterRouting }
 	} };`);
+}
 
 fs.writeFileSync(file, s);
 console.log(`applied ${applied} edit(s)`);
@@ -157,11 +219,20 @@ echo
 echo "verifying..."
 node -e '
 const s = require("fs").readFileSync(process.argv[1], "utf8");
-const checks = [
-  ["schema declares openRouterRouting", "openRouterRouting: z.any()"],
-  ["guard reads openRouterRouting",     "openRouterRouting === void 0) return {}"],
-  ["compat spreads openRouterRouting",  "{ openRouterRouting }"],
-];
+// Checked per layout: the 0.1.1+ resolver is gate-driven, so the guard and
+// spread that the older layout needs do not exist there and must not be
+// required. Demanding them would fail a correctly patched 0.1.1+ file.
+const gated = s.includes("openRouterRouting: \"offer\"");
+const checks = gated
+  ? [
+      ["schema declares openRouterRouting", "openRouterRouting: z.any()"],
+      ["compat gate offers openRouterRouting", "openRouterRouting: \"offer\""],
+    ]
+  : [
+      ["schema declares openRouterRouting", "openRouterRouting: z.any()"],
+      ["guard reads openRouterRouting",     "openRouterRouting === void 0) return {}"],
+      ["compat spreads openRouterRouting",  "{ openRouterRouting }"],
+    ];
 let bad = 0;
 for (const [label, needle] of checks) {
   const ok = s.includes(needle);

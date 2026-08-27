@@ -8,7 +8,7 @@ off. Both settings appear to work. Neither does. They fail **silently** — no
 error, no warning, just a different provider at a different price, and a bill
 for reasoning tokens you disabled.
 
-This repo documents exactly why, fixes both with a 3-line patch, and gives you
+This repo documents exactly why, fixes both with a small patch, and gives you
 tools that prove the fix on the wire instead of asking you to trust it.
 
 ```bash
@@ -43,9 +43,14 @@ quantizations and latencies. Measured, all three documented ways to pin:
 Only the body works — and dsh's settings schema strips the key that produces
 it before it reaches the code that would send it. The upstream library dsh
 vendors *already emits the field*; dsh simply never declared it as valid
-config. Hence a three-line fix rather than a feature.
+config. Hence a small fix rather than a feature.
 
-→ [`docs/03-provider-pinning.md`](docs/03-provider-pinning.md)
+Since **dsh 0.1.1**, dsh knows the field and **actively refuses** it
+(`openRouterRouting: "withhold"`), so the patch flips a gate rather than adding
+a schema line. `patch-openrouter.sh` detects which layout you have.
+
+→ [`docs/03-provider-pinning.md`](docs/03-provider-pinning.md),
+  [`docs/09-dsh-0.1.1-and-mandatory-reasoning.md`](docs/09-dsh-0.1.1-and-mandatory-reasoning.md)
 
 ### 2. `reasoning: "off"` does not turn reasoning off
 
@@ -58,7 +63,15 @@ configured with reasoning off. 46% of all output tokens; 9% of the run's cost.
 
 After the fix, verified across 93 consecutive requests: **0 reasoning tokens.**
 
-→ [`docs/04-reasoning.md`](docs/04-reasoning.md)
+**Caveat: some models cannot turn reasoning off at all.** When the catalogue
+says `reasoning.mandatory: true` (e.g. `z-ai/glm-5.3-flash`), `effort: "none"`
+is *rejected* rather than ignored, `medium` may not exist, and the default
+effort is often `max` — so the "no reasoning field is sent" trap above buys the
+**most expensive** level. Declare only the levels in `supported_efforts` and
+default to the lowest.
+
+→ [`docs/04-reasoning.md`](docs/04-reasoning.md),
+  [`docs/09-dsh-0.1.1-and-mandatory-reasoning.md`](docs/09-dsh-0.1.1-and-mandatory-reasoning.md)
 
 ### 3. `order` does not pin — it only *prefers*
 
@@ -115,6 +128,7 @@ balancer.
 - [06 — The hard pin, and what a fallback really costs](docs/06-hard-pin-and-fallback-cost.md) — why `order` is not a boundary
 - [07 — Sampling parameters, measured](docs/07-parameters-measured.md) — including why `seed` does not give reproducibility
 - [08 — Web search over OpenRouter](docs/08-web-search.md) — the fourth silent failure, and why its error names the wrong cause
+- [09 — dsh 0.1.1, and models that cannot stop reasoning](docs/09-dsh-0.1.1-and-mandatory-reasoning.md) — the upgrade that silently unpinned everything
 
 ---
 
